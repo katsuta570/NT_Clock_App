@@ -138,14 +138,13 @@ fun TimeTextAndButtons1(
                 fontWeight = FontWeight.Medium
             )
         }
+        Spacer(modifier = Modifier.size(10.dp))
         lapTimes.forEachIndexed { index, lapTime ->
             Text(
                 text = "Lap ${lapTimes.size - index}: ${formatTime(lapTime)}",
                 color = MaterialTheme.colorScheme.onBackground,
                 fontSize = 25.sp,
-                fontFamily = NimbusSans1,
-                fontWeight = FontWeight.Bold,
-                fontStyle = FontStyle.Italic
+                fontWeight = FontWeight.Normal,
             )
         }
     }
