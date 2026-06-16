@@ -141,7 +141,7 @@ fun TimeTextAndButtons1(
         Spacer(modifier = Modifier.size(10.dp))
         lapTimes.forEachIndexed { index, lapTime ->
             Text(
-                text = "Lap ${lapTimes.size - index}: ${formatTime(lapTime)}",
+                text = "Lap ${lapTimes.size - index}: ${formatTime(timeMs = lapTime)}",
                 color = MaterialTheme.colorScheme.onBackground,
                 fontSize = 25.sp,
                 fontWeight = FontWeight.Normal,
