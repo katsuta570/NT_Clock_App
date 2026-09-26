@@ -13,22 +13,16 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
@@ -46,6 +40,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
+import androidx.compose.material3.TimePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import com.example.nt_clock_app.ui.theme.NT_Clock_AppTheme
 import java.util.Calendar
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CardAM(innerPadding: PaddingValues) {
     val context = LocalContext.current
@@ -93,64 +89,117 @@ fun CardAM(innerPadding: PaddingValues) {
             }
         }
     ) { innerPadding ->
-        AlarmMenuContent(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues = innerPadding),
-            alarms = alarms,
-            onToggleEnabled = { alarmId, enabled ->
-                updateAlarms(
-                    updatedAlarms = alarms.map { alarm ->
-                        if (alarm.id == alarmId) alarm.copy(enabled = enabled) else alarm
+        Box(modifier = Modifier.fillMaxSize()) {
+            AlarmMenuContent(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues = innerPadding),
+                alarms = alarms,
+                onToggleEnabled = { alarmId, enabled ->
+                    val alarm = alarms.find { it.id == alarmId }
+
+                    if (alarm != null) {
+                        if (enabled) {
+                            scheduleAlarm(
+                                context = context,
+                                hour = alarm.hour,
+                                minute = alarm.minute,
+                                requestCode = alarm.id
+                            )
+                        } else {
+                            cancelAlarm(
+                                context = context,
+                                requestCode = alarm.id
+                            )
+                        }
+
+                        updateAlarms(
+                            updatedAlarms = alarms.map { alarmItem ->
+                                if (alarmItem.id == alarmId) {
+                                    alarmItem.copy(enabled = enabled)
+                                } else {
+                                    alarmItem
+                                }
+                            }
+                        )
                     }
-                )
-            },
-            onDelete = { alarmId ->
-                updateAlarms(updatedAlarms = alarms.filterNot { it.id == alarmId })
-            },
-            onEditAlarmName = { newName ->
-                updateAlarms(
-                    updatedAlarms = alarms.map { alarm ->
-                        alarm.copy(alarmName = newName)
-                    }
-                )
-            }
-        )
+                },
+                onDelete = { alarmId ->
+                    cancelAlarm(
+                        context = context,
+                        requestCode = alarmId
+                    )
+
+                    updateAlarms(
+                        updatedAlarms = alarms.filterNot { it.id == alarmId }
+                    )
+                },
+                onEditAlarmName = { newName ->
+                    updateAlarms(
+                        updatedAlarms = alarms.map { alarm ->
+                            alarm.copy(alarmName = newName)
+                        }
+                    )
+                }
+            )
+        }
+
+        val nextId = (alarms.maxOfOrNull { it.id } ?: 0) + 1
 
         AnimatedVisibility(
             visible = showTimePicker.value,
             enter = fadeIn() + scaleIn(),
             exit = fadeOut() + scaleOut()
         ) {
-            MyTimePicker1(
-                onConfirm = { hour, minute ->
-                    val nextId = (alarms.maxOfOrNull { it.id } ?: 0) + 1
+            MainTimePicker1(
+                onConfirm = { timePickerState ->
+                    val newAlarm = AlarmItem(
+                        id = nextId,
+                        hour = timePickerState.hour,
+                        minute = timePickerState.minute,
+                        enabled = true,
+                        alarmName = "My Alarm $nextId"
+                    )
 
                     updateAlarms(
-                        updatedAlarms = alarms + AlarmItem(
-                            id = nextId,
-                            hour = hour,
-                            minute = minute,
-                            enabled = true,
-                            alarmName = "Alarm"
-                        )
+                        updatedAlarms = alarms + newAlarm
                     )
 
                     scheduleAlarm(
-                        context,
-                        hour,
-                        minute,
-                        nextId
+                        context = context,
+                        hour = newAlarm.hour,
+                        minute = newAlarm.minute,
+                        requestCode = newAlarm.id
                     )
 
                     showTimePicker.value = false
                 },
-                onCancel = {
+                onDismiss = {
                     showTimePicker.value = false
                 }
             )
         }
     }
+}
+
+fun cancelAlarm(
+    context: Context,
+    requestCode: Int
+) {
+    val intent = Intent(context, AlarmReceiver::class.java)
+
+    val pendingIntent = PendingIntent.getBroadcast(
+        context,
+        requestCode,
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    val alarmManager =
+        context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+    alarmManager.cancel(pendingIntent)
+    pendingIntent.cancel()
 }
 
 @Composable
@@ -201,56 +250,47 @@ fun AlarmMenuContent(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MyTimePicker1(
-    onConfirm: (hour: Int, minute: Int) -> Unit,
-    onCancel: () -> Unit
+fun MainTimePicker1(
+    onConfirm: (TimePickerState) -> Unit,
+    onDismiss: () -> Unit
 ) {
     val currentTime = Calendar.getInstance()
+
     val timePickerState = rememberTimePickerState(
         initialHour = currentTime.get(Calendar.HOUR_OF_DAY),
         initialMinute = currentTime.get(Calendar.MINUTE),
         is24Hour = true
     )
 
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+    TimePickerDialog1(
+        onConfirm = { onConfirm(timePickerState) },
+        onDismiss = { onDismiss() }
     ) {
-        Column(
-            modifier = Modifier.width(IntrinsicSize.Max),
-        ) {
-            TimePicker(
-                state = timePickerState,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Row(modifier = Modifier.fillMaxWidth()) {
-
-                FilledIconButton(
-                    onClick = {
-                        onConfirm(
-                            timePickerState.hour,
-                            timePickerState.minute
-                        )
-                    },
-                    shape = RoundedCornerShape(size = 12.dp),
-                    modifier = Modifier.size(60.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Check, contentDescription = null)
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                FilledIconButton(
-                    onClick = onCancel,
-                    shape = RoundedCornerShape(size = 12.dp),
-                    modifier = Modifier.size(60.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = null)
-                }
-            }
-        }
+        TimePicker(state = timePickerState)
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TimePickerDialog1(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        dismissButton = {
+            TextButton(onClick = { onDismiss() }) {
+                Text("Dismiss")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm() }) {
+                Text("Confirm")
+            }
+        },
+        text = { content() }
+    )
 }
 
 
@@ -308,11 +348,6 @@ fun AlarmCard(
                         fontWeight = FontWeight.SemiBold,
                         fontStyle = FontStyle.Italic
                     )
-                    Text(
-                        text = "Monday ~ Friday",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Normal,
-                    )
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -349,12 +384,6 @@ fun AlarmCard(
                         }
                     }
                 }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
             }
         }
     }
