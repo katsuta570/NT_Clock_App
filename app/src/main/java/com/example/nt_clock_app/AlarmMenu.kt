@@ -104,6 +104,7 @@ fun CardAM(innerPadding: PaddingValues) {
                                 context = context,
                                 hour = alarm.hour,
                                 minute = alarm.minute,
+                                enabledDays = alarm.enabledDays,
                                 requestCode = alarm.id
                             )
                         } else {
@@ -140,7 +141,41 @@ fun CardAM(innerPadding: PaddingValues) {
                             alarm.copy(alarmName = newName)
                         }
                     )
-                }
+                },
+                onEditAlarmDays = { alarmId, enabledDays ->
+                    val alarm = alarms.find { it.id == alarmId }
+
+                    if (alarm != null) {
+                        val updatedAlarm = alarm.copy(
+                            enabledDays = enabledDays
+                        )
+
+                        updateAlarms(
+                            alarms.map {
+                                if (it.id == alarmId) {
+                                    updatedAlarm
+                                } else {
+                                    it
+                                }
+                            }
+                        )
+
+                        cancelAlarm(
+                            context = context,
+                            requestCode = alarmId
+                        )
+
+                        if (updatedAlarm.enabled) {
+                            scheduleAlarm(
+                                context = context,
+                                hour = updatedAlarm.hour,
+                                minute = updatedAlarm.minute,
+                                enabledDays = updatedAlarm.enabledDays,
+                                requestCode = updatedAlarm.id
+                            )
+                        }
+                    }
+                },
             )
         }
 
@@ -169,6 +204,7 @@ fun CardAM(innerPadding: PaddingValues) {
                         context = context,
                         hour = newAlarm.hour,
                         minute = newAlarm.minute,
+                        enabledDays = newAlarm.enabledDays,
                         requestCode = newAlarm.id
                     )
 
@@ -208,9 +244,13 @@ fun AlarmMenuContent(
     alarms: List<AlarmItem>,
     onToggleEnabled: (Int, Boolean) -> Unit,
     onDelete: (Int) -> Unit,
-    onEditAlarmName: (String) -> Unit
+    onEditAlarmName: (String) -> Unit,
+    onEditAlarmDays: (Int, List<Boolean>) -> Unit
 ) {
     val showEditAlarmNameMenu = remember { mutableStateOf(value = false) }
+    var editingDaysAlarmId by remember {
+        mutableStateOf<Int?>(null)
+    }
 
     if (alarms.isEmpty()) {
         Box(
@@ -232,8 +272,32 @@ fun AlarmMenuContent(
                 alarm = alarm,
                 onToggleEnabled = { enabled -> onToggleEnabled(alarm.id, enabled) },
                 onDelete = { onDelete(alarm.id) },
-                onEditAlarmName = {showEditAlarmNameMenu.value = true}
+                onEditAlarmName = { showEditAlarmNameMenu.value = true },
+                onEditAlarmDays = { editingDaysAlarmId = alarm.id }
             )
+
+            if (editingDaysAlarmId != null) {
+                val alarm = alarms.find {
+                    it.id == editingDaysAlarmId
+                }
+
+                if (alarm != null) {
+                    EditAlarmDays(
+                        enabledDays = alarm.enabledDays,
+                        onDismiss = {
+                            editingDaysAlarmId = null
+                        },
+                        onConfirm = { updatedDays ->
+                            onEditAlarmDays(
+                                alarm.id,
+                                updatedDays
+                            )
+
+                            editingDaysAlarmId = null
+                        }
+                    )
+                }
+            }
         }
     }
 
@@ -325,7 +389,8 @@ fun AlarmCard(
     alarm: AlarmItem,
     onToggleEnabled: (Boolean) -> Unit,
     onDelete: () -> Unit,
-    onEditAlarmName: () -> Unit
+    onEditAlarmName: () -> Unit,
+    onEditAlarmDays: () -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -348,6 +413,11 @@ fun AlarmCard(
                         fontWeight = FontWeight.SemiBold,
                         fontStyle = FontStyle.Italic
                     )
+                    TextButton(
+                        onClick = onEditAlarmDays
+                    ) {
+                        Text(text = "Repeat")
+                    }
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -393,26 +463,72 @@ fun scheduleAlarm(
     context: Context,
     hour: Int,
     minute: Int,
+    enabledDays: List<Boolean>,
     requestCode: Int
 ) {
+    if (enabledDays.none { it }) {
+        return
+    }
+
+    val now = Calendar.getInstance()
+
     val calendar = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, hour)
         set(Calendar.MINUTE, minute)
         set(Calendar.SECOND, 0)
         set(Calendar.MILLISECOND, 0)
-
-        if (before(Calendar.getInstance())) {
-            add(Calendar.DAY_OF_YEAR, 1)
-        }
     }
-    val intent = Intent(context, AlarmReceiver::class.java)
+
+    for (dayOffset in 0..6) {
+        val candidate = calendar.clone() as Calendar
+
+        candidate.add(
+            Calendar.DAY_OF_YEAR,
+            dayOffset
+        )
+
+        val calendarDay = candidate.get(Calendar.DAY_OF_WEEK)
+
+        val dayIndex = when (calendarDay) {
+            Calendar.MONDAY -> 0
+            Calendar.TUESDAY -> 1
+            Calendar.WEDNESDAY -> 2
+            Calendar.THURSDAY -> 3
+            Calendar.FRIDAY -> 4
+            Calendar.SATURDAY -> 5
+            Calendar.SUNDAY -> 6
+            else -> return
+        }
+
+        if (!enabledDays[dayIndex]) {
+            continue
+        }
+
+        if (dayOffset == 0 && candidate.before(now)) {
+            continue
+        }
+
+        calendar.timeInMillis = candidate.timeInMillis
+        break
+    }
+
+    val intent = Intent(
+        context,
+        AlarmReceiver::class.java
+    ).apply {
+        putExtra("alarm_id", requestCode)
+    }
+
     val pendingIntent = PendingIntent.getBroadcast(
         context,
         requestCode,
         intent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        PendingIntent.FLAG_UPDATE_CURRENT or
+                PendingIntent.FLAG_IMMUTABLE
     )
-    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+    val alarmManager =
+        context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         if (alarmManager.canScheduleExactAlarms()) {
@@ -435,6 +551,74 @@ fun scheduleAlarm(
     }
 }
 
+@Composable
+fun EditAlarmDays(
+    enabledDays: List<Boolean>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<Boolean>) -> Unit
+) {
+    var days by remember {
+        mutableStateOf(enabledDays)
+    }
+
+    val dayNames = listOf(
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(text = "Repeat")
+        },
+        text = {
+            Column {
+                dayNames.forEachIndexed { index, dayName ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = dayName,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        Switch(
+                            checked = days[index],
+                            onCheckedChange = { checked ->
+                                days = days.toMutableList().apply {
+                                    this[index] = checked
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onConfirm(days)
+                }
+            ) {
+                Text(text = "Confirm")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss
+            ) {
+                Text(text = "Dismiss")
+            }
+        }
+    )
+}
+
 @Preview(showSystemUi = true, name = "Smartphone Size", widthDp = 400, heightDp = 800)
 @Composable
 fun Preview_Mobile_AM() {
@@ -448,8 +632,8 @@ fun Preview_Mobile_AM() {
                 ),
                 onToggleEnabled = { _, _ -> },
                 onDelete = {},
-                onEditAlarmName = {}
-            )
+                onEditAlarmName = {},
+                onEditAlarmDays = { _, _ -> }            )
         }
     }
 }

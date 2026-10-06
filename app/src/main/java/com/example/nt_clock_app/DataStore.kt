@@ -18,7 +18,8 @@ data class AlarmItem(
     val hour: Int,
     val minute: Int,
     val enabled: Boolean = true,
-    val alarmName: String = "Alarm"
+    val alarmName: String = "Alarm",
+    val enabledDays: List<Boolean> = List(7) { true }
 )
 
 @Serializable

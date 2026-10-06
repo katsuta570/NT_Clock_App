@@ -1,32 +1,27 @@
 package com.example.nt_clock_app
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class AlarmReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
+
+    override fun onReceive(
+        context: Context,
+        intent: Intent
+    ) {
         Log.d(
             "AlarmReceiver",
             "アラームが作動しました。"
         )
 
         val channelId = "alarm_channel"
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "アラーム",
-                NotificationManager.IMPORTANCE_HIGH
-            )
-
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        }
 
         val notification = NotificationCompat.Builder(
             context,
@@ -39,11 +34,41 @@ class AlarmReceiver : BroadcastReceiver() {
             .setAutoCancel(true)
             .build()
 
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager =
+            context.getSystemService(
+                Context.NOTIFICATION_SERVICE
+            ) as NotificationManager
 
         notificationManager.notify(
             1001,
             notification
         )
+
+        val alarmId = intent.getIntExtra(
+            "alarm_id",
+            -1
+        )
+
+        if (alarmId == -1) {
+            return
+        }
+
+        CoroutineScope(Dispatchers.IO).launch {
+            val alarms = loadAlarms1(context)
+
+            val alarm = alarms.find {
+                it.id == alarmId
+            }
+
+            if (alarm != null && alarm.enabled) {
+                scheduleAlarm(
+                    context = context,
+                    hour = alarm.hour,
+                    minute = alarm.minute,
+                    enabledDays = alarm.enabledDays,
+                    requestCode = alarm.id
+                )
+            }
+        }
     }
 }
