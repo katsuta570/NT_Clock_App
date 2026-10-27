@@ -29,9 +29,19 @@ data class WorldClockItem(
     val zoneId: String
 )
 
+@Serializable
+data class TimerItem(
+    val id: Int,
+    val name: String,
+    val initialSeconds: Int,
+    val remainingSeconds: Int = initialSeconds,
+    val isRunning: Boolean = false
+)
+
 val Context.dataStore by preferencesDataStore(name = "Alarms_Prefs")
 val AlarmKey = stringPreferencesKey(name = "Alarms")
 val WorldClockKey = stringPreferencesKey(name = "WorldClocks")
+val TimerKey = stringPreferencesKey(name = "Timers")
 
 fun saveAlarms1(context: Context, alarms: List<AlarmItem>) {
     val json = Json.encodeToString(value = alarms)
@@ -62,5 +72,17 @@ fun saveWorldClocks1(context: Context, worldClocks: List<WorldClockItem>) {
 suspend fun loadWorldClocks1(context: Context): List<WorldClockItem> {
     val prefs = context.dataStore.data.first()
     val json = prefs[WorldClockKey] ?: return emptyList()
+    return Json.decodeFromString(json)
+}
+
+fun saveTimers(context: Context, timers: List<TimerItem>) {
+    val json = Json.encodeToString(timers)
+    CoroutineScope(Dispatchers.IO).launch {
+        context.dataStore.edit { prefs -> prefs[TimerKey] = json }
+    }
+}
+
+suspend fun loadTimers(context: Context): List<TimerItem> {
+    val json = context.dataStore.data.first()[TimerKey] ?: return emptyList()
     return Json.decodeFromString(json)
 }

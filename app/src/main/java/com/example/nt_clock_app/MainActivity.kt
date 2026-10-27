@@ -165,7 +165,7 @@ fun Components1() {
             }
 
             composable(route = Destination.Timer.route) {
-                TimerDisplayOnlyScreen()
+                TimerDisplayOnlyScreen(innerPadding)
             }
 
             composable(route = Destination.Stopwatch.route) {

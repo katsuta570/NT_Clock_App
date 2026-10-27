@@ -1,40 +1,28 @@
 package com.example.nt_clock_app
 
 import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.RequiresPermission
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,237 +33,148 @@ import com.example.nt_clock_app.ui.theme.NT_Clock_AppTheme
 import kotlinx.coroutines.delay
 
 @Composable
-fun TimerDisplayOnlyScreen() {
+fun TimerDisplayOnlyScreen(innerPadding: PaddingValues = PaddingValues()) {
     val context = LocalContext.current
+    var timers by remember { mutableStateOf<List<TimerItem>>(emptyList()) }
+    var showKeypad by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    fun updateTimers(updated: List<TimerItem>) { timers = updated; saveTimers(context, updated) }
 
-    val requestPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) {}
-
-    LaunchedEffect(key1 = Unit) {
+    LaunchedEffect(Unit) {
         createTimerFinishedNotificationChannel(context)
-    }
-
-    var timeInput by remember { mutableStateOf(value = "") }
-    var remainingSeconds by remember { mutableIntStateOf(value = 0) }
-    var isRunning by remember { mutableStateOf(false) }
-
-    LaunchedEffect(key1 = isRunning) {
-        while (isRunning && remainingSeconds > 0) {
-            delay(timeMillis = 1000)
-            remainingSeconds--
-
-            if (remainingSeconds == 0) {
-                isRunning = false
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    if (ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.POST_NOTIFICATIONS
-                        ) == PackageManager.PERMISSION_GRANTED
-                    ) {
-                        showTimerFinishedNotification(context)
-                    } else {
-                        requestPermissionLauncher.launch(
-                            input = Manifest.permission.POST_NOTIFICATIONS
-                        )
-                    }
-                } else {
-                    showTimerFinishedNotification(context)
-                }
-            }
+        timers = loadTimers(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
-    val displayTime = if (!isRunning) {
-        formatTimeString(timeInput)
-    } else {
-        formatTimeFromSeconds(sec = remainingSeconds)
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text(
-            modifier = Modifier.fillMaxWidth().padding(top = 150.dp),
-            text = displayTime,
-            fontSize = 80.sp,
-            fontFamily = NimbusSans1,
-            fontWeight = FontWeight.Bold,
-            fontStyle = FontStyle.Italic,
-            textAlign = TextAlign.Center
+    if (showKeypad || timers.isEmpty()) {
+        TimerKeypad(
+            Modifier.padding(innerPadding), (timers.maxOfOrNull { it.id } ?: 0) + 1,
+            onCreate = { seconds, name ->
+                val id = (timers.maxOfOrNull { it.id } ?: 0) + 1
+                updateTimers(timers + TimerItem(id, name, seconds)); showKeypad = false
+            },
+            onCancel = if (timers.isNotEmpty()) ({ showKeypad = false }) else null
         )
-        Spacer(modifier = Modifier.size(30.dp))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 40.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        return
+    }
+
+    Scaffold(modifier = Modifier.padding(innerPadding), floatingActionButton = {
+        FloatingActionButton(onClick = { showKeypad = true }) { Icon(Icons.Default.Add, "タイマーを追加") }
+    }) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                KeypadButton("1") { if (!isRunning) timeInput = addDigit(timeInput, "1") }
-                KeypadButton("2") { if (!isRunning) timeInput = addDigit(timeInput, "2") }
-                KeypadButton("3") { if (!isRunning) timeInput = addDigit(timeInput, "3") }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                KeypadButton("4") { if (!isRunning) timeInput = addDigit(timeInput, "4") }
-                KeypadButton("5") { if (!isRunning) timeInput = addDigit(timeInput, "5") }
-                KeypadButton("6") { if (!isRunning) timeInput = addDigit(timeInput, "6") }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                KeypadButton("7") { if (!isRunning) timeInput = addDigit(timeInput, "7") }
-                KeypadButton("8") { if (!isRunning) timeInput = addDigit(timeInput, "8") }
-                KeypadButton("9") { if (!isRunning) timeInput = addDigit(timeInput, "9") }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                Button(
-                    onClick = { if (!isRunning) timeInput = "" },
-                    modifier = Modifier.width(80.dp).height(60.dp),
-                    shape = MaterialTheme.shapes.medium,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text(
-                        text = "Clear",
-                        fontSize = 20.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                KeypadButton("0") { if (!isRunning) timeInput = addDigit(timeInput, "0") }
-                Button(
-                    onClick = { if (!isRunning) timeInput = deleteDigit(timeInput) },
-                    modifier = Modifier.width(80.dp).height(60.dp),
-                    shape = MaterialTheme.shapes.medium,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text(
-                        text = "Del",
-                        fontSize = 25.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(30.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Button(
-                onClick = {
-                    if (!isRunning && timeInput.isNotEmpty()) {
-                        remainingSeconds = convertToSeconds(timeInput)
-                        if (remainingSeconds > 0) isRunning = true
-                    }
-                },
-                modifier = Modifier.width(150.dp).height(70.dp),
-                shape = MaterialTheme.shapes.medium,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                )
-            ) {
-                Text(
-                    text = if (isRunning) "Running" else "Start",
-                    fontSize = 40.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+            items(timers, key = { it.id }) { timer ->
+                TimerCard(timer, onUpdate = { updated ->
+                    updateTimers(timers.map { if (it.id == updated.id) updated else it })
+                }, onFinished = { showTimerFinishedNotification(context, timer.name) })
             }
         }
     }
 }
 
-fun addDigit(old: String, d: String): String =
-    if (old.length >= 6) old else old + d
-
-fun deleteDigit(old: String): String =
-    if (old.isEmpty()) "" else old.dropLast(1)
-
-fun formatTimeString(input: String): String {
-    val padded = input.padStart(6, '0')
-    val h = padded.substring(0, 2)
-    val m = padded.substring(2, 4)
-    val s = padded.substring(4, 6)
-    return "$h:$m:$s"
+@Composable
+private fun TimerCard(timer: TimerItem, onUpdate: (TimerItem) -> Unit, onFinished: () -> Unit) {
+    var showNameEditor by remember { mutableStateOf(false) }
+    LaunchedEffect(timer.isRunning, timer.remainingSeconds) {
+        if (timer.isRunning && timer.remainingSeconds > 0) {
+            delay(1_000)
+            val remaining = timer.remainingSeconds - 1
+            onUpdate(timer.copy(remainingSeconds = remaining, isRunning = remaining > 0))
+            if (remaining == 0) onFinished()
+        }
+    }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp)) {
+            Text(timer.name, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Row(
+                Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                TimerProgress(timer, Modifier.size(190.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    FilledIconButton(onClick = {
+                        if (timer.remainingSeconds > 0) onUpdate(timer.copy(isRunning = !timer.isRunning))
+                    }, modifier = Modifier.size(56.dp)) {
+                        Icon(if (timer.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            if (timer.isRunning) "一時停止" else "再生")
+                    }
+                    FilledIconButton(onClick = { showNameEditor = true }, modifier = Modifier.size(56.dp)) {
+                        Icon(Icons.Default.Edit, "タイマー名を編集")
+                    }
+                }
+            }
+        }
+    }
+    if (showNameEditor) TimerNameDialog(timer.name, { showNameEditor = false }) { name ->
+        onUpdate(timer.copy(name = name.ifBlank { timer.name })); showNameEditor = false
+    }
 }
 
-fun formatTimeFromSeconds(sec: Int): String {
-    val h = sec / 3600
-    val m = (sec % 3600) / 60
-    val s = sec % 60
-    return "%02d:%02d:%02d".format(h, m, s)
+@Composable
+private fun TimerProgress(timer: TimerItem, modifier: Modifier) {
+    val progress = if (timer.initialSeconds == 0) 0f else timer.remainingSeconds.toFloat() / timer.initialSeconds
+    val trackColor = MaterialTheme.colorScheme.surface
+    val progressColor = MaterialTheme.colorScheme.primary
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = Stroke(width = 18.dp.toPx(), cap = StrokeCap.Round)
+            drawArc(trackColor, -90f, 360f, false, style = stroke)
+            drawArc(progressColor, -90f, 360f * progress, false, style = stroke)
+        }
+        Text(formatTimeFromSeconds(timer.remainingSeconds), fontSize = 32.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+    }
 }
 
-fun convertToSeconds(input: String): Int {
-    val padded = input.padStart(6, '0')
-    val h = padded.substring(0, 2).toInt()
-    val m = padded.substring(2, 4).toInt()
-    val s = padded.substring(4, 6).toInt()
-    return h * 3600 + m * 60 + s
+@Composable
+private fun TimerKeypad(modifier: Modifier, nextTimerNumber: Int, onCreate: (Int, String) -> Unit, onCancel: (() -> Unit)?) {
+    var input by remember { mutableStateOf("") }
+    Column(modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(formatTimeString(input), fontSize = 52.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(28.dp))
+        listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9")).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                row.forEach { digit -> KeypadButton(digit) { input = addDigit(input, digit) } }
+            }; Spacer(Modifier.height(12.dp))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            KeypadButton("C") { input = "" }; KeypadButton("0") { input = addDigit(input, "0") }; KeypadButton("⌫") { input = deleteDigit(input) }
+        }
+        Spacer(Modifier.height(28.dp))
+        Button(onClick = { onCreate(convertToSeconds(input), "Timer $nextTimerNumber") }, enabled = convertToSeconds(input) > 0, modifier = Modifier.width(180.dp).height(56.dp)) {
+            Text("タイマーを作成", fontSize = 18.sp)
+        }
+        if (onCancel != null) TextButton(onClick = onCancel) { Text("キャンセル") }
+    }
 }
+
+@Composable
+private fun TimerNameDialog(currentName: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var name by remember { mutableStateOf(currentName) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("タイマー名を変更") },
+        text = { OutlinedTextField(name, { name = it }, singleLine = true) },
+        confirmButton = { TextButton({ onConfirm(name) }) { Text("保存") } },
+        dismissButton = { TextButton(onDismiss) { Text("キャンセル") } })
+}
+
+fun addDigit(old: String, digit: String) = if (old.length >= 6) old else old + digit
+fun deleteDigit(old: String) = old.dropLast(1)
+fun formatTimeString(input: String): String { val p = input.padStart(6, '0'); return "${p.substring(0, 2)}:${p.substring(2, 4)}:${p.substring(4, 6)}" }
+fun formatTimeFromSeconds(seconds: Int): String { val h = seconds / 3600; val m = seconds % 3600 / 60; val s = seconds % 60; return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s) }
+fun convertToSeconds(input: String): Int { val p = input.padStart(6, '0'); return p.substring(0, 2).toInt() * 3600 + p.substring(2, 4).toInt() * 60 + p.substring(4, 6).toInt() }
 
 fun createTimerFinishedNotificationChannel(context: Context) {
-    if (
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-        ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.POST_NOTIFICATIONS
-        ) != PackageManager.PERMISSION_GRANTED
-    ) {
-        return
-    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.getSystemService(NotificationManager::class.java).createNotificationChannel(
+        NotificationChannel("timer_finished_channel", "タイマー完了", NotificationManager.IMPORTANCE_HIGH))
 }
-
-@RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
-fun showTimerFinishedNotification(context: Context) {
-    if (ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.POST_NOTIFICATIONS
-        ) != PackageManager.PERMISSION_GRANTED
-    ) {
-        return
-    }
-
-    val notification = NotificationCompat.Builder(context, "timer_finished_channel")
-        .setSmallIcon(android.R.drawable.ic_dialog_info)
-        .setContentTitle("タイマー終了")
-        .setContentText("設定したタイマーが 0 になりました。")
-        .setPriority(NotificationCompat.PRIORITY_HIGH)
-        .build()
-
-    NotificationManagerCompat.from(context).notify(1001, notification)
+fun showTimerFinishedNotification(context: Context, timerName: String) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+    val notification = NotificationCompat.Builder(context, "timer_finished_channel").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("タイマー終了").setContentText("$timerName が終了しました。").setPriority(NotificationCompat.PRIORITY_HIGH).build()
+    NotificationManagerCompat.from(context).notify(timerName.hashCode(), notification)
 }
-
-@Composable
-fun KeypadButton(text: String, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        modifier = Modifier.width(80.dp).height(60.dp),
-        shape = MaterialTheme.shapes.medium,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary
-        )
-    ) {
-        Text(
-            text = text,
-            fontSize = 35.sp
-        )
-    }
-}
-
-@Preview(showSystemUi = true)
-@Composable
-fun PreviewTimerMenu1() {
-    NT_Clock_AppTheme {
-        TimerDisplayOnlyScreen()
-    }
-}
+@Composable fun KeypadButton(text: String, onClick: () -> Unit) { Button(onClick, Modifier.width(80.dp).height(56.dp)) { Text(text, fontSize = if (text.length == 1) 28.sp else 20.sp) } }
+@Preview(showSystemUi = true) @Composable private fun PreviewTimerMenu() { NT_Clock_AppTheme { TimerDisplayOnlyScreen() } }

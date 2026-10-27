@@ -1,10 +1,16 @@
 package com.example.nt_clock_app
 
+import android.Manifest
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -56,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.nt_clock_app.ui.theme.NT_Clock_AppTheme
 import java.util.Calendar
 
@@ -65,8 +72,41 @@ fun CardAM(innerPadding: PaddingValues) {
     val context = LocalContext.current
     var alarms by remember { mutableStateOf<List<AlarmItem>>(value = emptyList()) }
     val showTimePicker = remember { mutableStateOf(value = false) }
+    val exactAlarmSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        // The special-access screen does not report a reliable result code, so check again.
+        if (canScheduleAlarmClock(context)) {
+            alarms.filter { it.enabled }.forEach { alarm ->
+                scheduleAlarm(context, alarm.hour, alarm.minute, alarm.enabledDays, alarm.id)
+            }
+        }
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {}
+
+    fun requestExactAlarmAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canScheduleAlarmClock(context)) {
+            exactAlarmSettingsLauncher.launch(
+                Intent(
+                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.parse("package:${context.packageName}")
+                )
+            )
+        }
+    }
 
     LaunchedEffect(Unit) {
+        createAlarmNotificationChannel(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         alarms = loadAlarms1(context)
     }
 
@@ -100,6 +140,7 @@ fun CardAM(innerPadding: PaddingValues) {
 
                     if (alarm != null) {
                         if (enabled) {
+                            requestExactAlarmAccess()
                             scheduleAlarm(
                                 context = context,
                                 hour = alarm.hour,
@@ -166,6 +207,7 @@ fun CardAM(innerPadding: PaddingValues) {
                         )
 
                         if (updatedAlarm.enabled) {
+                            requestExactAlarmAccess()
                             scheduleAlarm(
                                 context = context,
                                 hour = updatedAlarm.hour,
@@ -200,6 +242,7 @@ fun CardAM(innerPadding: PaddingValues) {
                         updatedAlarms = alarms + newAlarm
                     )
 
+                    requestExactAlarmAccess()
                     scheduleAlarm(
                         context = context,
                         hour = newAlarm.hour,
@@ -459,6 +502,12 @@ fun AlarmCard(
     }
 }
 
+fun canScheduleAlarmClock(context: Context): Boolean {
+    return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager)
+                .canScheduleExactAlarms()
+}
+
 fun scheduleAlarm(
     context: Context,
     hour: Int,
@@ -530,25 +579,21 @@ fun scheduleAlarm(
     val alarmManager =
         context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        if (alarmManager.canScheduleExactAlarms()) {
-            alarmManager.setAlarmClock(
-                AlarmManager.AlarmClockInfo(
-                    calendar.timeInMillis,
-                    pendingIntent
-                ),
-                pendingIntent
-            )
-        }
-    } else {
-        alarmManager.setAlarmClock(
-            AlarmManager.AlarmClockInfo(
-                calendar.timeInMillis,
-                pendingIntent
-            ),
-            pendingIntent
-        )
+    if (!canScheduleAlarmClock(context)) {
+        return
     }
+
+    val showIntent = PendingIntent.getActivity(
+        context,
+        requestCode,
+        Intent(context, MainActivity::class.java),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    alarmManager.setAlarmClock(
+        AlarmManager.AlarmClockInfo(calendar.timeInMillis, showIntent),
+        pendingIntent
+    )
 }
 
 @Composable
